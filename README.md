@@ -8,7 +8,7 @@ Improvements over the original wrapper:
 |---------|----------|----------|
 | Frame with no face | ❌ Crashes | ✅ Warning + pass-through |
 | All frames have no face | ❌ Crashes | ✅ Warning + return original video |
-| Model path | Node's own `checkpoints/` symlink | ✅ ComfyUI standard `models/checkpoints/LatentSync-1.6/` |
+| Model path | Node's own `checkpoints/` symlink | ✅ One plain file per weight in a standard ComfyUI model folder |
 | OOM on long videos | ❌ Possible | ✅ Configurable `chunk_frames` (default 80, safe for 24 GB VRAM) |
 
 ---
@@ -24,44 +24,33 @@ The `latentsync` inference library is bundled directly inside this package.
 
 ### Required model files
 
-| File | Size | Purpose |
-|------|------|---------|
-| `latentsync_unet.pt` | ~4.8 GB | Main lip-sync UNet |
-| `whisper/tiny.pt` | ~72 MB | Audio feature extractor |
-| `vae/` (directory) | ~320 MB | VAE encoder/decoder |
+Each weight is one plain file in a standard ComfyUI model folder (`MODEL_FILES` in `nodes.py`).
+Nothing downloads at run time.
 
-### Where to place them
+| Folder and file | Source | Size | sha256 |
+|---|---|---|---|
+| `diffusion_models/latentsync_1.6_unet.pt` | [ByteDance/LatentSync-1.6](https://huggingface.co/ByteDance/LatentSync-1.6) `latentsync_unet.pt` | 5.07 GB | `0a478e89eb660f82da4c35dbdde8a5adfb27f99d1b4e50edd03729e1e98316d3` |
+| `audio_encoders/latentsync_whisper_tiny.pt` | ByteDance/LatentSync-1.6 `whisper/tiny.pt` | 75.6 MB | `65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9` |
+| `vae/sd_vae_ft_mse.safetensors` | [stabilityai/sd-vae-ft-mse](https://huggingface.co/stabilityai/sd-vae-ft-mse) `diffusion_pytorch_model.safetensors` | 335 MB | `a1d993488569e928462932c8c38a0760b874d166399b14414135bd9c42df5815` |
+| `checkpoints/insightface_buffalo_l_det_10g.onnx` | insightface `buffalo_l.zip` (v0.7) `det_10g.onnx` | 16.9 MB | `5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91` |
+| `checkpoints/insightface_buffalo_l_2d106det.onnx` | insightface `buffalo_l.zip` (v0.7) `2d106det.onnx` | 5.0 MB | `f001b856447c413801ef5c42091ed0cd516fcd21f2d6b79635b1e733a7109dbf` |
 
-All model files go inside ComfyUI's standard **checkpoints** folder, under a subdirectory named `LatentSync-1.6`:
+The VAE config ships in this repository (`configs/vae/sd_vae_ft_mse.json`). The two face models run with
+onnxruntime (`latentsync/utils/onnx_face.py`), so the insightface package is not needed. The buffalo_l
+models are for non-commercial research use (insightface licence).
 
-```
-ComfyUI/
-└── models/
-    └── checkpoints/
-        └── LatentSync-1.6/          ← create this folder
-            ├── latentsync_unet.pt
-            ├── whisper/
-            │   └── tiny.pt
-            └── vae/
-                ├── config.json
-                └── diffusion_pytorch_model.safetensors
-```
-
-### Download from Hugging Face
+### Download
 
 ```bash
-# Option 1 – huggingface-cli (recommended)
-pip install huggingface_hub
-huggingface-cli download ByteDance/LatentSync-1.6 \
-    latentsync_unet.pt \
-    whisper/tiny.pt \
-    vae/config.json \
-    vae/diffusion_pytorch_model.safetensors \
-    --local-dir ComfyUI/models/checkpoints/LatentSync-1.6
-
-# Option 2 – manual download
-# Visit: https://huggingface.co/ByteDance/LatentSync-1.6
-# Download the files above and place them as shown.
+M=ComfyUI/models
+hf download ByteDance/LatentSync-1.6 latentsync_unet.pt whisper/tiny.pt --local-dir /tmp/ls
+mv /tmp/ls/latentsync_unet.pt $M/diffusion_models/latentsync_1.6_unet.pt
+mv /tmp/ls/whisper/tiny.pt $M/audio_encoders/latentsync_whisper_tiny.pt
+hf download stabilityai/sd-vae-ft-mse diffusion_pytorch_model.safetensors --local-dir /tmp/vae
+mv /tmp/vae/diffusion_pytorch_model.safetensors $M/vae/sd_vae_ft_mse.safetensors
+hf download public-data/insightface models/buffalo_l/det_10g.onnx models/buffalo_l/2d106det.onnx --local-dir /tmp/if
+mv /tmp/if/models/buffalo_l/det_10g.onnx $M/checkpoints/insightface_buffalo_l_det_10g.onnx
+mv /tmp/if/models/buffalo_l/2d106det.onnx $M/checkpoints/insightface_buffalo_l_2d106det.onnx
 ```
 
 ---
