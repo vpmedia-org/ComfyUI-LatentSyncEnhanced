@@ -39,7 +39,7 @@ if _NODE_DIR not in sys.path:
 
 from latentsync.pipelines.lipsync_pipeline import LipsyncPipeline
 from latentsync.utils.image_processor import ImageProcessor, load_fixed_mask
-from latentsync.utils.util import read_video, read_audio, write_video, check_ffmpeg_installed
+from latentsync.utils.util import read_video, read_video_cv2, read_audio, write_video, check_ffmpeg_installed
 from latentsync.models.unet import UNet3DConditionModel
 from latentsync.whisper.audio2feature import Audio2Feature
 from diffusers import AutoencoderKL, DDIMScheduler
@@ -273,7 +273,9 @@ class EnhancedLipsyncPipeline(LipsyncPipeline):
         whisper_chunks = whisper_chunks[:actual_audio_frames]
 
         # ── Video (loop to match audio, no face detection yet) ──────────
-        video_frames = read_video(video_path, use_decord=False)
+        # The node wrote the frames at video_fps and the Whisper chunks use video_fps. A 25 fps re-encode
+        # (change_fps=True) changes the frame count and deletes ./temp, which is ComfyUI's temp folder.
+        video_frames = read_video(video_path, change_fps=False, use_decord=False)
         video_frames = self._loop_frames_only(video_frames, actual_audio_frames)
 
         total_frames = len(video_frames)
@@ -557,12 +559,8 @@ class LatentSyncEnhancedNode:
                 frames = images
             frames_uint8 = (frames.cpu() * 255).to(torch.uint8)
 
-            try:
-                import torchvision.io as tio
-                tio.write_video(temp_video_path, frames_uint8, fps=video_fps, video_codec="h264")
-            except Exception:
-                import imageio
-                imageio.mimsave(temp_video_path, frames_uint8.numpy(), fps=video_fps, macro_block_size=1)
+            # torchvision 0.24 removed torchvision.io.read_video and write_video; imageio and OpenCV remain.
+            write_video(temp_video_path, frames_uint8.numpy(), fps=video_fps)
 
             # ── Prepare input audio ─────────────────────────────────────
             waveform    = audio["waveform"]
@@ -573,7 +571,7 @@ class LatentSyncEnhancedNode:
                 resampler = torchaudio.transforms.Resample(sample_rate, 16000).to(device)
                 waveform  = resampler(waveform.to(device))
                 sample_rate = 16000
-            torchaudio.save(audio_path, waveform.cpu(), sample_rate)
+            sf.write(audio_path, waveform.cpu().numpy().T, sample_rate)
             resampled_audio = {"waveform": waveform.unsqueeze(0).cpu(), "sample_rate": sample_rate}
 
             # ── Load config ─────────────────────────────────────────────
@@ -620,9 +618,7 @@ class LatentSyncEnhancedNode:
                 raise FileNotFoundError(f"Output video not found: {output_video_path}")
 
             # ── Read result ─────────────────────────────────────────────
-            import torchvision.io as tio
-            processed_frames = tio.read_video(output_video_path, pts_unit="sec")[0]
-            processed_frames = processed_frames.float() / 255.0
+            processed_frames = torch.from_numpy(read_video_cv2(output_video_path)).float() / 255.0
 
             return (processed_frames.cpu(), resampled_audio)
 

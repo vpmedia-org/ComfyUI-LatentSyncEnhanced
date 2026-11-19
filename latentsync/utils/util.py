@@ -28,7 +28,8 @@ from torchvision import transforms
 
 from einops import rearrange
 import cv2
-from decord import AudioReader, VideoReader
+import soundfile
+import torchaudio
 import shutil
 import subprocess
 
@@ -64,6 +65,8 @@ def read_video(video_path: str, change_fps=True, use_decord=True):
 
 
 def read_video_decord(video_path: str):
+    from decord import VideoReader
+
     vr = VideoReader(video_path)
     video_frames = vr[:].asnumpy()
     vr.seek(0)
@@ -76,8 +79,7 @@ def read_video_cv2(video_path: str):
 
     # Check if the video was opened successfully
     if not cap.isOpened():
-        print("Error: Could not open video.")
-        return np.array([])
+        raise RuntimeError(f"OpenCV could not open the video {video_path}")
 
     frames = []
 
@@ -103,12 +105,10 @@ def read_video_cv2(video_path: str):
 def read_audio(audio_path: str, audio_sample_rate: int = 16000):
     if audio_path is None:
         raise ValueError("Audio path is required.")
-    ar = AudioReader(audio_path, sample_rate=audio_sample_rate, mono=True)
-
-    # To access the audio samples
-    audio_samples = torch.from_numpy(ar[:].asnumpy())
-    audio_samples = audio_samples.squeeze(0)
-
+    samples, sample_rate = soundfile.read(audio_path, dtype="float32", always_2d=True)
+    audio_samples = torch.from_numpy(samples.mean(axis=1))
+    if sample_rate != audio_sample_rate:
+        audio_samples = torchaudio.functional.resample(audio_samples, sample_rate, audio_sample_rate)
     return audio_samples
 
 
