@@ -58,9 +58,13 @@ MODEL_FILES = {
     "whisper": ("audio_encoders", "latentsync_whisper_tiny.pt"),
     "vae": ("vae", "sd_vae_ft_mse.safetensors"),
     # det_10g.onnx and 2d106det.onnx of insightface buffalo_l, run by latentsync/utils/onnx_face.py.
-    "face_detector": ("checkpoints", "insightface_buffalo_l_det_10g.onnx"),
-    "face_landmarks": ("checkpoints", "insightface_buffalo_l_2d106det.onnx"),
+    "face_detector": ("latentsync", "insightface_buffalo_l_det_10g.onnx"),
+    "face_landmarks": ("latentsync", "insightface_buffalo_l_2d106det.onnx"),
 }
+
+# GET /models/<folder> lists a core folder by file extension, and no core folder takes .onnx. A folder that
+# add_model_folder_path creates lists every file.
+folder_paths.add_model_folder_path("latentsync", os.path.join(folder_paths.models_dir, "latentsync"))
 
 # The config.json of stabilityai/sd-vae-ft-mse at commit 31f26fdeee1355a5c34592e401dd41e45d25a493.
 VAE_CONFIG = os.path.join(_NODE_DIR, "configs", "vae", "sd_vae_ft_mse.json")

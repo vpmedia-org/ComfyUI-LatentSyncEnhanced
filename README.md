@@ -24,16 +24,17 @@ The `latentsync` inference library is bundled directly inside this package.
 
 ### Required model files
 
-Each weight is one plain file in a standard ComfyUI model folder (`MODEL_FILES` in `nodes.py`).
-Nothing downloads at run time.
+Each weight is one plain file in a ComfyUI model folder (`MODEL_FILES` in `nodes.py`). Nothing downloads
+at run time. The face models go in `models/latentsync/`, a folder that the node registers: ComfyUI lists a
+core folder by file extension, and no core folder takes `.onnx`.
 
 | Folder and file | Source | Size | sha256 |
 |---|---|---|---|
 | `diffusion_models/latentsync_1.6_unet.pt` | [ByteDance/LatentSync-1.6](https://huggingface.co/ByteDance/LatentSync-1.6) `latentsync_unet.pt` | 5.07 GB | `0a478e89eb660f82da4c35dbdde8a5adfb27f99d1b4e50edd03729e1e98316d3` |
 | `audio_encoders/latentsync_whisper_tiny.pt` | ByteDance/LatentSync-1.6 `whisper/tiny.pt` | 75.6 MB | `65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9` |
 | `vae/sd_vae_ft_mse.safetensors` | [stabilityai/sd-vae-ft-mse](https://huggingface.co/stabilityai/sd-vae-ft-mse) `diffusion_pytorch_model.safetensors` | 335 MB | `a1d993488569e928462932c8c38a0760b874d166399b14414135bd9c42df5815` |
-| `checkpoints/insightface_buffalo_l_det_10g.onnx` | insightface `buffalo_l.zip` (v0.7) `det_10g.onnx` | 16.9 MB | `5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91` |
-| `checkpoints/insightface_buffalo_l_2d106det.onnx` | insightface `buffalo_l.zip` (v0.7) `2d106det.onnx` | 5.0 MB | `f001b856447c413801ef5c42091ed0cd516fcd21f2d6b79635b1e733a7109dbf` |
+| `latentsync/insightface_buffalo_l_det_10g.onnx` | insightface `buffalo_l.zip` (v0.7) `det_10g.onnx` | 16.9 MB | `5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91` |
+| `latentsync/insightface_buffalo_l_2d106det.onnx` | insightface `buffalo_l.zip` (v0.7) `2d106det.onnx` | 5.0 MB | `f001b856447c413801ef5c42091ed0cd516fcd21f2d6b79635b1e733a7109dbf` |
 
 The VAE config ships in this repository (`configs/vae/sd_vae_ft_mse.json`). The two face models run with
 onnxruntime (`latentsync/utils/onnx_face.py`), so the insightface package is not needed. The buffalo_l
@@ -49,8 +50,8 @@ mv /tmp/ls/whisper/tiny.pt $M/audio_encoders/latentsync_whisper_tiny.pt
 hf download stabilityai/sd-vae-ft-mse diffusion_pytorch_model.safetensors --local-dir /tmp/vae
 mv /tmp/vae/diffusion_pytorch_model.safetensors $M/vae/sd_vae_ft_mse.safetensors
 hf download public-data/insightface models/buffalo_l/det_10g.onnx models/buffalo_l/2d106det.onnx --local-dir /tmp/if
-mv /tmp/if/models/buffalo_l/det_10g.onnx $M/checkpoints/insightface_buffalo_l_det_10g.onnx
-mv /tmp/if/models/buffalo_l/2d106det.onnx $M/checkpoints/insightface_buffalo_l_2d106det.onnx
+mv /tmp/if/models/buffalo_l/det_10g.onnx $M/latentsync/insightface_buffalo_l_det_10g.onnx
+mv /tmp/if/models/buffalo_l/2d106det.onnx $M/latentsync/insightface_buffalo_l_2d106det.onnx
 ```
 
 ---
