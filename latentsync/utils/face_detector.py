@@ -1,18 +1,22 @@
-from insightface.app import FaceAnalysis
 import numpy as np
 import torch
+
+from .onnx_face import FaceModels
 
 INSIGHTFACE_DETECT_SIZE = 512
 
 
 class FaceDetector:
-    def __init__(self, device="cuda"):
-        self.app = FaceAnalysis(
-            allowed_modules=["detection", "landmark_2d_106"],
-            root="checkpoints/auxiliary",
-            providers=["CUDAExecutionProvider"],
+    def __init__(self, device="cuda", model_paths=None):
+        """model_paths: {"detector": det_10g.onnx, "landmarks": 2d106det.onnx} of insightface buffalo_l."""
+        if not model_paths:
+            raise ValueError("FaceDetector needs model_paths with the detector and landmarks onnx files")
+        self.app = FaceModels(
+            model_paths["detector"],
+            model_paths["landmarks"],
+            device,
+            (INSIGHTFACE_DETECT_SIZE, INSIGHTFACE_DETECT_SIZE),
         )
-        self.app.prepare(ctx_id=cuda_to_int(device), det_size=(INSIGHTFACE_DETECT_SIZE, INSIGHTFACE_DETECT_SIZE))
 
     def __call__(self, frame, threshold=0.5):
         f_h, f_w, _ = frame.shape

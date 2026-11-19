@@ -57,6 +57,9 @@ MODEL_FILES = {
     "unet": ("diffusion_models", "latentsync_1.6_unet.pt"),
     "whisper": ("audio_encoders", "latentsync_whisper_tiny.pt"),
     "vae": ("vae", "sd_vae_ft_mse.safetensors"),
+    # det_10g.onnx and 2d106det.onnx of insightface buffalo_l, run by latentsync/utils/onnx_face.py.
+    "face_detector": ("checkpoints", "insightface_buffalo_l_det_10g.onnx"),
+    "face_landmarks": ("checkpoints", "insightface_buffalo_l_2d106det.onnx"),
 }
 
 # The config.json of stabilityai/sd-vae-ft-mse at commit 31f26fdeee1355a5c34592e401dd41e45d25a493.
@@ -242,7 +245,9 @@ class EnhancedLipsyncPipeline(LipsyncPipeline):
 
         device = self._execution_device
         mask_image = load_fixed_mask(height, mask_image_path)
-        self.image_processor = ImageProcessor(height, device="cuda", mask_image=mask_image)
+        self.image_processor = ImageProcessor(
+            height, device="cuda", mask_image=mask_image, face_model_paths=self.face_model_paths
+        )
         self.set_progress_bar_config(desc=f"Sample frames: {num_frames}")
 
         height = height or self.unet.config.sample_size * self.vae_scale_factor
@@ -500,6 +505,10 @@ class LatentSyncEnhancedNode:
             unet=unet,
             scheduler=scheduler,
         ).to("cuda")
+        pipeline.face_model_paths = {
+            "detector": model_path("face_detector"),
+            "landmarks": model_path("face_landmarks"),
+        }
 
         # DeepCache (optional speed-up)
         try:
