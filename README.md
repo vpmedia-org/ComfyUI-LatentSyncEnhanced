@@ -66,6 +66,8 @@ mv /tmp/if/models/buffalo_l/2d106det.onnx $M/latentsync/insightface_buffalo_l_2d
 | `lips_expression` | FLOAT | 1.5 | Lip movement strength (guidance scale). Range: 1.0–3.0 |
 | `inference_steps` | INT | 20 | Diffusion denoising steps. More = slower but higher quality |
 | `chunk_frames` | INT | 80 | Frames per processing segment. **Reduce if you hit OOM.** |
+| `video_fps` | FLOAT | 25.0 | Frame rate of the input frames. |
+| `unet`, `whisper`, `vae`, `face_detector`, `face_landmarks` | file (optional) | the names above | The model file of each weight, from its folder. |
 
 ### chunk_frames guide (VRAM)
 

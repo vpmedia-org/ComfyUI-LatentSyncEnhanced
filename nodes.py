@@ -73,8 +73,10 @@ VAE_CONFIG = os.path.join(_NODE_DIR, "configs", "vae", "sd_vae_ft_mse.json")
 _VAE_ATTENTION_NAMES = {"query": "to_q", "key": "to_k", "value": "to_v", "proj_attn": "to_out.0"}
 
 
-def model_path(key: str) -> str:
-    folder, name = MODEL_FILES[key]
+def model_path(key: str, name: str | None = None) -> str:
+    """The path of a weight: `name` (a node input) in the folder of MODEL_FILES, else the default name."""
+    folder, default = MODEL_FILES[key]
+    name = name or default
     path = folder_paths.get_full_path(folder, name)
     if path is None:
         raise FileNotFoundError(
@@ -83,11 +85,11 @@ def model_path(key: str) -> str:
     return path
 
 
-def load_vae(weight_dtype) -> AutoencoderKL:
+def load_vae(path: str, weight_dtype) -> AutoencoderKL:
     with open(VAE_CONFIG, encoding="utf-8") as f:
         vae = AutoencoderKL.from_config(json.load(f))
     state = {}
-    for name, tensor in load_file(model_path("vae")).items():
+    for name, tensor in load_file(path).items():
         head, _, last = name.rpartition(".")
         prefix, _, part = head.rpartition(".")
         if ".attentions." in name and part in _VAE_ATTENTION_NAMES:
@@ -425,7 +427,7 @@ class LatentSyncEnhancedNode:
     """
     Lip-sync node with:
     - Graceful handling of frames without a detectable face.
-    - Model loading from ComfyUI's standard checkpoints/LatentSync-1.6/.
+    - Model files chosen per input from ComfyUI model folders (MODEL_FILES gives the defaults).
     - Configurable chunk_frames to prevent OOM on 24 GB VRAM.
     """
 
@@ -456,7 +458,12 @@ class LatentSyncEnhancedNode:
                     "step": 0.001,
                     "tooltip": "FPS of the input video frames. Must match the source video fps (e.g. 23.976, 24, 25, 29.97, 30).",
                 }),
-            }
+            },
+            # One file per weight; an omitted input uses the default name of MODEL_FILES.
+            "optional": {
+                key: (folder_paths.get_filename_list(folder), {"default": name})
+                for key, (folder, name) in MODEL_FILES.items()
+            },
         }
 
     RETURN_TYPES  = ("IMAGE", "AUDIO")
@@ -466,7 +473,7 @@ class LatentSyncEnhancedNode:
 
     # ------------------------------------------------------------------
 
-    def _load_pipeline(self, config, weight_dtype) -> EnhancedLipsyncPipeline:
+    def _load_pipeline(self, config, weight_dtype, paths) -> EnhancedLipsyncPipeline:
         """Instantiate and return an EnhancedLipsyncPipeline on CUDA."""
         # Scheduler — created directly (no HuggingFace download)
         scheduler = DDIMScheduler(
@@ -485,19 +492,19 @@ class LatentSyncEnhancedNode:
             raise ValueError(f"Unsupported cross_attention_dim: {config.model.cross_attention_dim}")
 
         audio_encoder = Audio2Feature(
-            model_path=model_path("whisper"),
+            model_path=paths["whisper"],
             device="cuda",
             num_frames=config.data.num_frames,
             audio_feat_length=config.data.audio_feat_length,
         )
 
         # VAE
-        vae = load_vae(weight_dtype)
+        vae = load_vae(paths["vae"], weight_dtype)
         vae.config.scaling_factor = 0.18215
         vae.config.shift_factor   = 0
 
         # UNet
-        unet_path = model_path("unet")
+        unet_path = paths["unet"]
         unet, _ = UNet3DConditionModel.from_pretrained(
             OmegaConf.to_container(config.model),
             unet_path,
@@ -512,8 +519,8 @@ class LatentSyncEnhancedNode:
             scheduler=scheduler,
         ).to("cuda")
         pipeline.face_model_paths = {
-            "detector": model_path("face_detector"),
-            "landmarks": model_path("face_landmarks"),
+            "detector": paths["face_detector"],
+            "landmarks": paths["face_landmarks"],
         }
 
         # DeepCache (optional speed-up)
@@ -530,7 +537,8 @@ class LatentSyncEnhancedNode:
 
     # ------------------------------------------------------------------
 
-    def inference(self, images, audio, seed, lips_expression, inference_steps, chunk_frames, video_fps):
+    def inference(self, images, audio, seed, lips_expression, inference_steps, chunk_frames, video_fps, **names):
+        paths = {key: model_path(key, names.get(key)) for key in MODEL_FILES}
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         use_fp16 = False
 
@@ -589,7 +597,7 @@ class LatentSyncEnhancedNode:
                 raise FileNotFoundError(f"Mask image not found: {mask_image_path}")
 
             # ── Build pipeline ──────────────────────────────────────────
-            pipeline = self._load_pipeline(config, weight_dtype)
+            pipeline = self._load_pipeline(config, weight_dtype, paths)
 
             if seed != -1:
                 set_seed(seed)
