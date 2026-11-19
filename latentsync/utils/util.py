@@ -17,7 +17,6 @@ import numpy as np
 import json
 from typing import Union
 from pathlib import Path
-import matplotlib.pyplot as plt
 import imageio
 
 import torch
@@ -186,6 +185,8 @@ def one_step_sampling(ddim_scheduler, pred_noise, timesteps, x_t):
 
 
 def plot_loss_chart(save_path: str, *args):
+    import matplotlib.pyplot as plt
+
     # Creating the plot
     plt.figure()
     for loss_line in args:
