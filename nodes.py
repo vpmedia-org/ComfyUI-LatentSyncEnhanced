@@ -3,10 +3,12 @@ ComfyUI-LatentSyncEnhanced
 ==========================
 Improvements over the original ComfyUI-LatentSyncWrapper:
   1. No crash when some (or all) frames have no face — prints warning instead.
-  2. Models loaded from ComfyUI's standard checkpoints/LatentSync-1.6/ via folder_paths.
+  2. Every weight is one plain file in a standard ComfyUI model folder (MODEL_FILES), found via
+     folder_paths. Nothing downloads at run time.
   3. Segment-based processing prevents OOM on 24 GB VRAM (default 80 frames/segment).
 """
 
+import json
 import os
 import sys
 import math
@@ -42,25 +44,50 @@ from latentsync.models.unet import UNet3DConditionModel
 from latentsync.whisper.audio2feature import Audio2Feature
 from diffusers import AutoencoderKL, DDIMScheduler
 from accelerate.utils import set_seed
+from safetensors.torch import load_file
 
 
 # ---------------------------------------------------------------------------
 # Model path resolution via ComfyUI folder_paths
 # ---------------------------------------------------------------------------
 
-def _find_latentsync_checkpoints() -> str:
-    """Return the path to LatentSync-1.6 inside ComfyUI's checkpoints directories."""
-    for ckpt_dir in folder_paths.get_folder_paths("checkpoints"):
-        candidate = os.path.join(ckpt_dir, "LatentSync-1.6")
-        if os.path.isdir(candidate):
-            print(f"[LatentSyncEnhanced] Checkpoints found at: {candidate}")
-            return candidate
-    searched = folder_paths.get_folder_paths("checkpoints")
-    raise FileNotFoundError(
-        "LatentSync-1.6 not found in ComfyUI checkpoints.\n"
-        "Expected: models/checkpoints/LatentSync-1.6/\n"
-        f"Searched in: {searched}"
-    )
+# Each weight is one plain file in a standard ComfyUI model folder: (folder, file name). A pinned download
+# list (one url and sha256 per file) can place every file, with no subfolder and no run-time download.
+MODEL_FILES = {
+    "unet": ("diffusion_models", "latentsync_1.6_unet.pt"),
+    "whisper": ("audio_encoders", "latentsync_whisper_tiny.pt"),
+    "vae": ("vae", "sd_vae_ft_mse.safetensors"),
+}
+
+# The config.json of stabilityai/sd-vae-ft-mse at commit 31f26fdeee1355a5c34592e401dd41e45d25a493.
+VAE_CONFIG = os.path.join(_NODE_DIR, "configs", "vae", "sd_vae_ft_mse.json")
+
+# The sd-vae-ft-mse weights use the attention names of diffusers 0.4; from_pretrained renames them the same way.
+_VAE_ATTENTION_NAMES = {"query": "to_q", "key": "to_k", "value": "to_v", "proj_attn": "to_out.0"}
+
+
+def model_path(key: str) -> str:
+    folder, name = MODEL_FILES[key]
+    path = folder_paths.get_full_path(folder, name)
+    if path is None:
+        raise FileNotFoundError(
+            f"LatentSync needs models/{folder}/{name}; searched {folder_paths.get_folder_paths(folder)}"
+        )
+    return path
+
+
+def load_vae(weight_dtype) -> AutoencoderKL:
+    with open(VAE_CONFIG, encoding="utf-8") as f:
+        vae = AutoencoderKL.from_config(json.load(f))
+    state = {}
+    for name, tensor in load_file(model_path("vae")).items():
+        head, _, last = name.rpartition(".")
+        prefix, _, part = head.rpartition(".")
+        if ".attentions." in name and part in _VAE_ATTENTION_NAMES:
+            name = f"{prefix}.{_VAE_ATTENTION_NAMES[part]}.{last}"
+        state[name] = tensor
+    vae.load_state_dict(state)
+    return vae.to(dtype=weight_dtype)
 
 
 # ---------------------------------------------------------------------------
@@ -428,7 +455,7 @@ class LatentSyncEnhancedNode:
 
     # ------------------------------------------------------------------
 
-    def _load_pipeline(self, ckpt_dir: str, config, weight_dtype) -> EnhancedLipsyncPipeline:
+    def _load_pipeline(self, config, weight_dtype) -> EnhancedLipsyncPipeline:
         """Instantiate and return an EnhancedLipsyncPipeline on CUDA."""
         # Scheduler — created directly (no HuggingFace download)
         scheduler = DDIMScheduler(
@@ -442,37 +469,24 @@ class LatentSyncEnhancedNode:
             steps_offset=1,
         )
 
-        # Whisper audio encoder
-        if config.model.cross_attention_dim == 384:
-            whisper_name = "tiny"
-        elif config.model.cross_attention_dim == 768:
-            whisper_name = "small"
-        else:
+        # Whisper audio encoder: LatentSync 1.6 (cross_attention_dim 384) uses Whisper tiny.
+        if config.model.cross_attention_dim != 384:
             raise ValueError(f"Unsupported cross_attention_dim: {config.model.cross_attention_dim}")
 
-        whisper_path = os.path.join(ckpt_dir, "whisper", f"{whisper_name}.pt")
-        if not os.path.exists(whisper_path):
-            print(
-                f"[LatentSyncEnhanced] WARNING: {whisper_path} not found, "
-                f"falling back to online Whisper model '{whisper_name}'."
-            )
-            whisper_path = whisper_name
-
         audio_encoder = Audio2Feature(
-            model_path=whisper_path,
+            model_path=model_path("whisper"),
             device="cuda",
             num_frames=config.data.num_frames,
             audio_feat_length=config.data.audio_feat_length,
         )
 
         # VAE
-        vae_dir = os.path.join(ckpt_dir, "vae")
-        vae = AutoencoderKL.from_pretrained(vae_dir, torch_dtype=weight_dtype, local_files_only=True)
+        vae = load_vae(weight_dtype)
         vae.config.scaling_factor = 0.18215
         vae.config.shift_factor   = 0
 
         # UNet
-        unet_path = os.path.join(ckpt_dir, "latentsync_unet.pt")
+        unet_path = model_path("unet")
         unet, _ = UNet3DConditionModel.from_pretrained(
             OmegaConf.to_container(config.model),
             unet_path,
@@ -563,11 +577,8 @@ class LatentSyncEnhancedNode:
             if not os.path.exists(mask_image_path):
                 raise FileNotFoundError(f"Mask image not found: {mask_image_path}")
 
-            # ── Resolve checkpoint dir ──────────────────────────────────
-            ckpt_dir = _find_latentsync_checkpoints()
-
             # ── Build pipeline ──────────────────────────────────────────
-            pipeline = self._load_pipeline(ckpt_dir, config, weight_dtype)
+            pipeline = self._load_pipeline(config, weight_dtype)
 
             if seed != -1:
                 set_seed(seed)
